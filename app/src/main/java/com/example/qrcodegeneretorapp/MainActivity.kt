@@ -1,31 +1,34 @@
 package com.example.qrcodegeneretorapp
 
-import android.graphics.Bitmap
-import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
+import androidx.compose.material.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.example.qrcodegeneretorapp.ui.theme.QrCodeGeneretorAppTheme
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.WriterException
-import com.google.zxing.qrcode.QRCodeWriter
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,7 +39,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
-                    RenderQr()
+                    Column(
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        PreviewViewComposable()
+                        Text(
+                            text = "Scan QR Code",
+                            modifier = Modifier.padding(top = 48.dp)
+                        )
+
+                    }
                 }
             }
         }
@@ -44,78 +57,55 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun RenderQr() {
-    Image(
-        painter = rememberQrBitmapPainter(content = "https://dev.to"),
-        contentDescription = "DEV Communit Code",
-        contentScale = ContentScale.FillBounds,
-        modifier = Modifier.size(135.dp),
+fun PreviewViewComposable() {
+    AndroidView(
+        { context ->
+            val cameraExecutor = Executors.newSingleThreadExecutor()
+            val previewView = PreviewView(context).also {
+                it.scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+                val preview = Preview.Builder()
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+
+                val imageCapture = ImageCapture.Builder().build()
+
+                val imageAnalyzer = ImageAnalysis.Builder()
+                    .build()
+                    .also {
+                        it.setAnalyzer(cameraExecutor, BarcodeAnalyser {
+                            Toast.makeText(context, "Barcode found", Toast.LENGTH_SHORT).show()
+                        })
+                    }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                try {
+                    // Unbind use cases before rebinding
+                    cameraProvider.unbindAll()
+
+                    // Bind use cases to camera
+                    cameraProvider.bindToLifecycle(
+                        context as ComponentActivity,
+                        cameraSelector,
+                        preview,
+                        imageCapture,
+                        imageAnalyzer
+                    )
+
+                } catch (exc: Exception) {
+                    Log.e("DEBUG", "Use case binding failed", exc)
+                }
+            }, ContextCompat.getMainExecutor(context))
+            previewView
+        },
+        modifier = Modifier
+            .size(width = 300.dp, height = 300.dp)
     )
-}
-
-@Composable
-fun rememberQrBitmapPainter(
-    content: String,
-    size: Dp = 150.dp,
-    padding: Dp = 0.dp
-): BitmapPainter {
-
-    val density = LocalDensity.current
-    val sizePx = with(density) { size.roundToPx() }
-    val paddingPx = with(density) { padding.roundToPx() }
-
-    var bitmap by remember(content) {
-        mutableStateOf<Bitmap?>(null)
-    }
-
-    LaunchedEffect(bitmap) {
-        if (bitmap != null) return@LaunchedEffect
-
-        launch(Dispatchers.IO) {
-            val qrCodeWriter = QRCodeWriter()
-
-            val encodeHints = mutableMapOf<EncodeHintType, Any?>()
-                .apply {
-                    this[EncodeHintType.MARGIN] = paddingPx
-                }
-
-            val bitmapMatrix = try {
-                qrCodeWriter.encode(
-                    content, BarcodeFormat.QR_CODE,
-                    sizePx, sizePx, encodeHints
-                )
-            } catch (ex: WriterException) {
-                null
-            }
-
-            val matrixWidth = bitmapMatrix?.width ?: sizePx
-            val matrixHeight = bitmapMatrix?.height ?: sizePx
-
-            val newBitmap = Bitmap.createBitmap(
-                bitmapMatrix?.width ?: sizePx,
-                bitmapMatrix?.height ?: sizePx,
-                Bitmap.Config.ARGB_8888
-            )
-
-            for (x in 0 until matrixWidth) {
-                for (y in 0 until matrixHeight) {
-                    val shouldColorPixel = bitmapMatrix?.get(x, y) ?: false
-                    val pixelColor = if (shouldColorPixel) Color.BLACK else Color.WHITE
-
-                    newBitmap.setPixel(x, y, pixelColor)
-                }
-            }
-
-            bitmap = newBitmap
-        }
-    }
-
-    return remember(bitmap) {
-        val currentBitmap = bitmap ?: Bitmap.createBitmap(
-            sizePx, sizePx,
-            Bitmap.Config.ARGB_8888,
-        ).apply { eraseColor(Color.TRANSPARENT) }
-
-        BitmapPainter(currentBitmap.asImageBitmap())
-    }
 }
