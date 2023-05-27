@@ -1,30 +1,23 @@
 package com.example.qrcodegeneretorapp
 
-import android.graphics.Bitmap
-import android.graphics.Color
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
+import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
+import androidx.compose.material.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import com.example.qrcodegeneretorapp.ui.theme.QrCodeGeneretorAppTheme
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.WriterException
-import com.google.zxing.qrcode.QRCodeWriter
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,7 +29,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
-                    RenderQr()
+                    RenderUi(baseContext)
                 }
             }
         }
@@ -44,78 +37,51 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun RenderQr() {
-    Image(
-        painter = rememberQrBitmapPainter(content = "https://dev.to"),
-        contentDescription = "DEV Communit Code",
-        contentScale = ContentScale.FillBounds,
-        modifier = Modifier.size(135.dp),
-    )
-}
+private fun RenderUi(context: Context) {
+    val qrValue = remember { mutableStateOf("QR Value") }
 
-@Composable
-fun rememberQrBitmapPainter(
-    content: String,
-    size: Dp = 150.dp,
-    padding: Dp = 0.dp
-): BitmapPainter {
-
-    val density = LocalDensity.current
-    val sizePx = with(density) { size.roundToPx() }
-    val paddingPx = with(density) { padding.roundToPx() }
-
-    var bitmap by remember(content) {
-        mutableStateOf<Bitmap?>(null)
-    }
-
-    LaunchedEffect(bitmap) {
-        if (bitmap != null) return@LaunchedEffect
-
-        launch(Dispatchers.IO) {
-            val qrCodeWriter = QRCodeWriter()
-
-            val encodeHints = mutableMapOf<EncodeHintType, Any?>()
-                .apply {
-                    this[EncodeHintType.MARGIN] = paddingPx
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column {
+            Button(
+                onClick = {
+                    configureCodeScanner(context = context) {
+                        qrValue.value = it
+                    }
                 }
-
-            val bitmapMatrix = try {
-                qrCodeWriter.encode(
-                    content, BarcodeFormat.QR_CODE,
-                    sizePx, sizePx, encodeHints
-                )
-            } catch (ex: WriterException) {
-                null
+            ) {
+                Text(text = "Scan QR Code")
             }
-
-            val matrixWidth = bitmapMatrix?.width ?: sizePx
-            val matrixHeight = bitmapMatrix?.height ?: sizePx
-
-            val newBitmap = Bitmap.createBitmap(
-                bitmapMatrix?.width ?: sizePx,
-                bitmapMatrix?.height ?: sizePx,
-                Bitmap.Config.ARGB_8888
-            )
-
-            for (x in 0 until matrixWidth) {
-                for (y in 0 until matrixHeight) {
-                    val shouldColorPixel = bitmapMatrix?.get(x, y) ?: false
-                    val pixelColor = if (shouldColorPixel) Color.BLACK else Color.WHITE
-
-                    newBitmap.setPixel(x, y, pixelColor)
-                }
-            }
-
-            bitmap = newBitmap
+            Text(text = qrValue.value)
         }
     }
+}
 
-    return remember(bitmap) {
-        val currentBitmap = bitmap ?: Bitmap.createBitmap(
-            sizePx, sizePx,
-            Bitmap.Config.ARGB_8888,
-        ).apply { eraseColor(Color.TRANSPARENT) }
+private fun configureCodeScanner(
+    context: Context,
+    qrValue: (String) -> Unit
+) {
+    val options = GmsBarcodeScannerOptions.Builder()
+        .setBarcodeFormats(
+            Barcode.FORMAT_QR_CODE,
+            Barcode.FORMAT_AZTEC
+        )
+        .build()
 
-        BitmapPainter(currentBitmap.asImageBitmap())
-    }
+    val scanner = GmsBarcodeScanning.getClient(context, options)
+
+    scanner.startScan()
+        .addOnSuccessListener { barcode ->
+            // Task completed successfully
+            val rawValue: String? = barcode.rawValue
+            qrValue(rawValue.orEmpty())
+        }
+        .addOnCanceledListener {
+            // Task canceled
+        }
+        .addOnFailureListener { e ->
+            // Task failed with an exception
+        }
 }
